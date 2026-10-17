@@ -1,7 +1,7 @@
 import os
 import requests
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import RedirectResponse, JSONResponse
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
 
@@ -20,7 +20,7 @@ class JSONRPCRequest(BaseModel):
 # --- 1. MCP Core Endpoint (टूल्स और रिक्वेस्ट हैंडल करने के लिए) ---
 @app.post("/mcp")
 def mcp_endpoint(request: JSONRPCRequest):
-    # अगर Claude टूल्स की लिस्ट मांग रहा है (tools/list)
+    # जब Claude टूल्स की लिस्ट मांगता है
     if request.method == "tools/list":
         return {
             "jsonrpc": "2.0",
@@ -45,7 +45,7 @@ def mcp_endpoint(request: JSONRPCRequest):
             "id": request.id
         }
 
-    # अगर Claude किसी टूल को चला रहा है (tools/call) या सामान्य प्रॉम्ट भेज रहा है
+    # जब Claude किसी टूल को चलाता है या चैट करता है
     prompt_text = "Hello"
     if request.params:
         if "arguments" in request.params and "prompt" in request.params["arguments"]:
@@ -67,7 +67,6 @@ def mcp_endpoint(request: JSONRPCRequest):
         response = requests.post(API_URL, json=payload, headers=headers)
         res_data = response.json()
         
-        # MCP टूल फॉर्मेट के हिसाब से रिजल्ट रिटर्न करना
         ai_reply = "No response"
         if "choices" in res_data and len(res_data["choices"]) > 0:
             ai_reply = res_data["choices"][0].get("message", {}).get("content", str(res_data))
@@ -93,7 +92,7 @@ def mcp_endpoint(request: JSONRPCRequest):
             "id": request.id
         }
 
-# --- 2. OAuth Discovery Metadata ---
+# --- 2. OAuth Discovery Metadata (Claude के हैंडشेक के लिए) ---
 @app.get("/.well-known/oauth-authorization-server")
 @app.get("/.well-known/openid-configuration")
 def oauth_metadata():
