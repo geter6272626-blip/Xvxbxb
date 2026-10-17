@@ -1,6 +1,7 @@
 import os
 import requests
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
 
@@ -8,6 +9,7 @@ app = FastAPI(title="Triverse Cloud MCP Server")
 
 API_KEY = os.getenv("TRIVERSE_API_KEY")
 API_URL = "https://api.triverse.ai/v1/chat/completions"
+BASE_URL = "https://xvxbxb.onrender.com"
 
 class JSONRPCRequest(BaseModel):
     jsonrpc: str = "2.0"
@@ -48,22 +50,40 @@ def mcp_endpoint(request: JSONRPCRequest):
             "id": request.id
         }
 
-# --- यहाँ नए ऑथेंटिकेशन / OAuth एंडपॉइंट्स जोड़े गए हैं ताकि 404 Not Found न आए ---
-@app.get("/authorize")
-def oauth_authorize(response_type: Optional[str] = None, client_id: Optional[str] = None, redirect_uri: Optional[str] = None, state: Optional[str] = None):
-    # सीधे ऑथराइजेशन कोड पास कर देगा ताकि ऐप आगे बढ़ जाए
-    if redirect_uri:
-        from fastapi.responses import RedirectResponse
-        return RedirectResponse(url=f"{redirect_uri}?code=mock_auth_code_123&state={state}")
-    return {"status": "authorized", "code": "mock_auth_code_123"}
+# --- 1. OAuth Discovery Metadata (ताकि Claude को रास्ते पता चलें) ---
+@app.get("/.well-known/oauth-authorization-server")
+@app.get("/.well-known/openid-configuration")
+def oauth_metadata():
+    return {
+        "issuer": BASE_URL,
+        "authorization_endpoint": f"{BASE_URL}/authorize",
+        "token_endpoint": f"{BASE_URL}/token",
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "client_credentials"],
+        "token_endpoint_auth_methods_supported": ["client_secret_basic", "none"]
+    }
 
+# --- 2. OAuth Authorization Endpoint ---
+@app.get("/authorize")
+def oauth_authorize(
+    response_type: Optional[str] = None,
+    client_id: Optional[str] = None,
+    redirect_uri: Optional[str] = None,
+    state: Optional[str] = None
+):
+    if redirect_uri:
+        # क्लाइंट को तुरंत ऑथ कोड के साथ रीडायरेक्ट कर देगा
+        return RedirectResponse(url=f"{redirect_uri}?code=mock_auth_code_xyz&state={state}")
+    return {"status": "authorized", "code": "mock_auth_code_xyz"}
+
+# --- 3. OAuth Token Endpoint ---
 @app.post("/token")
 @app.post("/oauth/token")
 def oauth_token():
     return {
         "access_token": API_KEY,
         "token_type": "Bearer",
-        "expires_in": 3600
+        "expires_in": 86400
     }
 
 @app.get("/mcp")
@@ -73,4 +93,4 @@ def mcp_get():
 @app.get("/")
 def home():
     return {"status": "Triverse MCP Server is running successfully on Render!"}
-        
+    
