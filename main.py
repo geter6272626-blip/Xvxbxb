@@ -1,11 +1,11 @@
 import os
 import requests
-from fastapi import FastAPI, HTTPException, Header, Query
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse, JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Any, Dict
 
-app = FastAPI(title="Triverse Cloud MCP Server")
+app = FastAPI(title="Triverse Cloud MCP Server with Tools")
 
 API_KEY = os.getenv("TRIVERSE_API_KEY")
 API_URL = "https://api.triverse.ai/v1/chat/completions"
@@ -17,19 +17,47 @@ class JSONRPCRequest(BaseModel):
     params: Optional[Dict[str, Any]] = None
     id: Optional[Any] = None
 
+# --- 1. MCP Core Endpoint (टूल्स और रिक्वेस्ट हैंडल करने के लिए) ---
 @app.post("/mcp")
 def mcp_endpoint(request: JSONRPCRequest):
+    # अगर Claude टूल्स की लिस्ट मांग रहा है (tools/list)
+    if request.method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "result": {
+                "tools": [
+                    {
+                        "name": "triverse_chat",
+                        "description": "Send a prompt or message to Triverse AI and get a response.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "prompt": {
+                                    "type": "string",
+                                    "description": "The message or prompt to send to Triverse AI."
+                                }
+                            },
+                            "required": ["prompt"]
+                        }
+                    }
+                ]
+            },
+            "id": request.id
+        }
+
+    # अगर Claude किसी टूल को चला रहा है (tools/call) या सामान्य प्रॉम्ट भेज रहा है
+    prompt_text = "Hello"
+    if request.params:
+        if "arguments" in request.params and "prompt" in request.params["arguments"]:
+            prompt_text = request.params["arguments"]["prompt"]
+        elif "prompt" in request.params:
+            prompt_text = request.params["prompt"]
+
     headers = {
         "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
     
-    prompt_text = "Hello"
-    if request.params and "prompt" in request.params:
-        prompt_text = request.params["prompt"]
-    elif request.method:
-        prompt_text = request.method
-
     payload = {
         "model": "default-model",
         "messages": [{"role": "user", "content": prompt_text}]
@@ -38,9 +66,24 @@ def mcp_endpoint(request: JSONRPCRequest):
     try:
         response = requests.post(API_URL, json=payload, headers=headers)
         res_data = response.json()
+        
+        # MCP टूल फॉर्मेट के हिसाब से रिजल्ट रिटर्न करना
+        ai_reply = "No response"
+        if "choices" in res_data and len(res_data["choices"]) > 0:
+            ai_reply = res_data["choices"][0].get("message", {}).get("content", str(res_data))
+        else:
+            ai_reply = str(res_data)
+
         return {
             "jsonrpc": "2.0",
-            "result": res_data,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": ai_reply
+                    }
+                ]
+            },
             "id": request.id
         }
     except Exception as e:
@@ -50,7 +93,7 @@ def mcp_endpoint(request: JSONRPCRequest):
             "id": request.id
         }
 
-# --- 1. OAuth Discovery Metadata (ताकि Claude को रास्ते पता चलें) ---
+# --- 2. OAuth Discovery Metadata ---
 @app.get("/.well-known/oauth-authorization-server")
 @app.get("/.well-known/openid-configuration")
 def oauth_metadata():
@@ -63,7 +106,7 @@ def oauth_metadata():
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "none"]
     }
 
-# --- 2. OAuth Authorization Endpoint ---
+# --- 3. OAuth Authorization Endpoint ---
 @app.get("/authorize")
 def oauth_authorize(
     response_type: Optional[str] = None,
@@ -72,14 +115,14 @@ def oauth_authorize(
     state: Optional[str] = None
 ):
     if redirect_uri:
-        # क्लाइंट को तुरंत ऑथ कोड के साथ रीडायरेक्ट कर देगा
-        return RedirectResponse(url=f"{redirect_uri}?code=mock_auth_code_xyz&state={state}")
+        separator = "&" if "?" in redirect_uri else "?"
+        return RedirectResponse(url=f"{redirect_uri}{separator}code=mock_auth_code_xyz&state={state}")
     return {"status": "authorized", "code": "mock_auth_code_xyz"}
 
-# --- 3. OAuth Token Endpoint ---
+# --- 4. OAuth Token Endpoint ---
 @app.post("/token")
 @app.post("/oauth/token")
-def oauth_token():
+def oauth_token(request: Request):
     return {
         "access_token": API_KEY,
         "token_type": "Bearer",
@@ -88,9 +131,9 @@ def oauth_token():
 
 @app.get("/mcp")
 def mcp_get():
-    return {"status": "online", "protocol": "Model Context Protocol over HTTP"}
+    return {"status": "online", "protocol": "Model Context Protocol over HTTP with Tools"}
 
 @app.get("/")
 def home():
-    return {"status": "Triverse MCP Server is running successfully on Render!"}
-        
+    return {"status": "Triverse MCP Server with Tools is running on Render!"}
+    
