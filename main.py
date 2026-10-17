@@ -93,4 +93,4 @@ def mcp_get():
 @app.get("/")
 def home():
     return {"status": "Triverse MCP Server is running successfully on Render!"}
-    
+        
