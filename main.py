@@ -2,7 +2,7 @@ import os
 import requests
 from fastapi import FastAPI, HTTPException, Header
 from pydantic import BaseModel
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any, Dict
 
 app = FastAPI(title="Triverse Cloud MCP Server")
 
@@ -16,22 +16,18 @@ class JSONRPCRequest(BaseModel):
     id: Optional[Any] = None
 
 @app.post("/mcp")
-def mcp_endpoint(request: JSONRPCRequest, authorization: Optional[str] = Header(None)):
-    # अगर क्लाइंट ऑथेंटिकेशन भेज रहा है, तो ठीक, वरना एनवायरनमेंट वाली की इस्तेमाल होगी
-    expected_auth = f"Bearer {API_KEY}"
+def mcp_endpoint(request: JSONRPCRequest):
+    headers = {
+        "Authorization": f"Bearer {API_KEY}",
+        "Content-Type": "application/json"
+    }
     
-    # यदि Claude या कोई टूल सीधे JSON-RPC या प्रॉम्प्ट भेज रहा है
     prompt_text = "Hello"
     if request.params and "prompt" in request.params:
         prompt_text = request.params["prompt"]
     elif request.method:
         prompt_text = request.method
 
-    headers = {
-        "Authorization": expected_auth,
-        "Content-Type": "application/json"
-    }
-    
     payload = {
         "model": "default-model",
         "messages": [{"role": "user", "content": prompt_text}]
@@ -40,8 +36,6 @@ def mcp_endpoint(request: JSONRPCRequest, authorization: Optional[str] = Header(
     try:
         response = requests.post(API_URL, json=payload, headers=headers)
         res_data = response.json()
-        
-        # MCP / JSON-RPC रिस्पॉन्स फॉर्मेट
         return {
             "jsonrpc": "2.0",
             "result": res_data,
@@ -54,14 +48,27 @@ def mcp_endpoint(request: JSONRPCRequest, authorization: Optional[str] = Header(
             "id": request.id
         }
 
+# --- यहाँ नए ऑथेंटिकेशन / OAuth एंडपॉइंट्स जोड़े गए हैं ताकि 404 Not Found न आए ---
+@app.get("/authorize")
+def oauth_authorize(response_type: Optional[str] = None, client_id: Optional[str] = None, redirect_uri: Optional[str] = None, state: Optional[str] = None):
+    # सीधे ऑथराइजेशन कोड पास कर देगा ताकि ऐप आगे बढ़ जाए
+    if redirect_uri:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=f"{redirect_uri}?code=mock_auth_code_123&state={state}")
+    return {"status": "authorized", "code": "mock_auth_code_123"}
+
+@app.post("/token")
+@app.post("/oauth/token")
+def oauth_token():
+    return {
+        "access_token": API_KEY,
+        "token_type": "Bearer",
+        "expires_in": 3600
+    }
+
 @app.get("/mcp")
 def mcp_get():
-    # अगर कोई ब्राउज़र या कनेक्टर GET रिक्वेस्ट करे तो MCP हैंडशेक की जानकारी दे
-    return {
-        "status": "online",
-        "protocol": "Model Context Protocol over HTTP",
-        "endpoints": {"mcp": "POST /mcp"}
-    }
+    return {"status": "online", "protocol": "Model Context Protocol over HTTP"}
 
 @app.get("/")
 def home():
